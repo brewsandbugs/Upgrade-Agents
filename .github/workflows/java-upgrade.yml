@@ -1,0 +1,60 @@
+name: Automated Java Dynamic Upgrade & Create PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_repository:
+        description: 'Target repository to upgrade (e.g., owner/repo-name)'
+        required: true
+        default: 'thesrishtisharma/Java-upgrade-agent'
+        type: string
+
+jobs:
+  upgrade-and-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Target Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.target_repository }}
+          token: ${{ secrets.GH_PAT }}
+          path: '.' # Forces checkout directly into the current root directory
+
+      - name: Set up Latest JDK
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21' # Set build runner JDK to the current LTS
+          distribution: 'temurin'
+          cache: maven
+          cache-dependency-path: '**/pom.xml'
+
+      - name: Upgrade All Dependencies & Plugins to Latest Stable
+        run: |
+          mvn versions:use-latest-releases \
+            versions:update-properties \
+            versions:display-plugin-updates
+
+      - name: Run OpenRewrite to Upgrade Java & Frameworks
+        run: |
+          mvn -U org.openrewrite.maven:rewrite-maven-plugin:run \
+            -Drewrite.recipeArtifactCoordinates=org.openrewrite.recipe:rewrite-migrate-java:RELEASE \
+            -Drewrite.activeRecipes=org.openrewrite.java.migrate.UpgradeToJava21,org.openrewrite.java.dependencies.UpgradeDependencyVersion
+
+      - name: Verify Build & Tests
+        run: mvn clean test
+
+      - name: Clean Build Artifacts
+        run: mvn clean
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GH_PAT }}
+          commit-message: "chore: upgrade project dependencies and Java target to latest LTS"
+          title: "Automated Upgrade: Latest Java LTS & Dependencies"
+          body: |
+            This PR was automatically created by the Java Upgrade Action.
+            - Upgraded all dependencies to their latest stable releases.
+            - Updated Java compiler source/target settings and modernized codebase via OpenRewrite.
+          branch: feature/latest-java-upgrade
+          # 'base' parameter removed so it dynamically defaults to whatever primary branch exists (main or master)
